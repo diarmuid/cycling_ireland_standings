@@ -204,30 +204,40 @@ def cmd_club(args):
 
 def cmd_rider(args):
     """Look up a rider by name."""
-    rows = get_rider_details(args.name)
+    rows = get_rider_details(args.name, club=args.club)
     if not rows:
-        print(f"No rider found matching '{args.name}'.")
+        msg = f"No rider found matching '{args.name}'"
+        if args.club:
+            msg += f" at club '{args.club}'"
+        print(msg + ".")
         return
 
-    r = rows[0]
-    print(f"\n{'=' * 60}")
-    print(f"  Rider: {r['name']}")
-    print(f"  Club:  {r['club']}")
-    print(f"  Gender: {r['gender']}")
-    print(f"  UUID:  {r['uuid']}")
-    print(f"{'=' * 60}")
-    print(f"{'Comp':>5s} {'Rank':>5s} {'Rider Cat':<8s} {'Pts':>5s}")
-    print("-" * 30)
-    for row in rows:
-        prov = "*" if row["is_provisional"] else " "
-        print(
-            f"{row['competition_category']:>5s} {row['rank']:>5d} "
-            f"{row['rider_category']:<8s} {row['points']:>5s}{prov}"
-        )
-    print()
+    # Group rows by UUID to detect duplicates
+    from collections import OrderedDict
+    by_uuid: OrderedDict = OrderedDict()
+    for r in rows:
+        by_uuid.setdefault(r["uuid"], {"name": r["name"], "club": r["club"], "gender": r["gender"], "rankings": []})
+        by_uuid[r["uuid"]]["rankings"].append(r)
 
-    # Show race results if available
-    results = get_rider_race_results(args.name)
+    for uuid, info in by_uuid.items():
+        print(f"\n{'=' * 60}")
+        print(f"  Rider: {info['name']}")
+        print(f"  Club:  {info['club']}")
+        print(f"  Gender: {info['gender']}")
+        print(f"  UUID:  {uuid}")
+        print(f"{'=' * 60}")
+        print(f"{'Comp':>5s} {'Rank':>5s} {'Rider Cat':<8s} {'Pts':>5s}")
+        print("-" * 30)
+        for r in info["rankings"]:
+            prov = "*" if r["is_provisional"] else " "
+            print(
+                f"{r['competition_category']:>5s} {r['rank']:>5d} "
+                f"{r['rider_category']:<8s} {r['points']:>5s}{prov}"
+            )
+        print()
+
+    # Show race results (use club for disambiguation if there are duplicates)
+    results = get_rider_race_results(args.name, club=args.club)
     if results:
         print(f"  Race history:")
         current_year = None
@@ -318,6 +328,7 @@ def main():
     # rider
     p = sub.add_parser("rider", help="Look up a rider by name")
     p.add_argument("name", help="Rider name (case-insensitive, partial match)")
+    p.add_argument("--club", help="Disambiguate by club name (partial match)")
     p.set_defaults(func=cmd_rider)
 
     # clubs

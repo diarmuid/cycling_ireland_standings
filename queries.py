@@ -84,20 +84,43 @@ def get_stats():
     return stats
 
 
-def get_rider_race_results(name: str):
-    """Get all race results for a rider by name, grouped by year."""
+def get_rider_details(name: str, club: str | None = None):
+    """Get rider profile and current rankings by name, optionally filtered by club."""
     conn = get_connection()
-    rows = conn.execute(
-        """
+    query = """
+        SELECT DISTINCT r.uuid, r.name, r.club, r.gender,
+               rk.competition_category, rk.rider_category,
+               rk.rank, rk.points, rk.is_provisional
+        FROM riders r
+        JOIN rankings rk ON r.uuid = rk.rider_uuid
+        WHERE r.name LIKE ?
+    """
+    params = [f"%{name}%"]
+    if club:
+        query += " AND r.club LIKE ?"
+        params.append(f"%{club}%")
+    query += " ORDER BY r.club, rk.competition_category"
+    rows = conn.execute(query, params).fetchall()
+    conn.close()
+    return rows
+
+
+def get_rider_race_results(name: str, club: str | None = None):
+    """Get all race results for a rider by name, optionally filtered by club."""
+    conn = get_connection()
+    query = """
         SELECT rr.race_date, rr.event_name, rr.race_name,
                rr.position, rr.points, rr.year
         FROM race_results rr
         JOIN riders r ON r.uuid = rr.rider_uuid
         WHERE r.name LIKE ?
-        ORDER BY rr.year DESC, rr.race_date DESC
-        """,
-        [f"%{name}%"],
-    ).fetchall()
+    """
+    params = [f"%{name}%"]
+    if club:
+        query += " AND r.club LIKE ?"
+        params.append(f"%{club}%")
+    query += " ORDER BY rr.year DESC, rr.race_date DESC"
+    rows = conn.execute(query, params).fetchall()
     conn.close()
     return rows
 
@@ -113,25 +136,6 @@ def list_clubs():
         GROUP BY club
         ORDER BY rider_count DESC
         """
-    ).fetchall()
-    conn.close()
-    return rows
-
-
-def get_rider_details(name: str):
-    """Get rider profile and current rankings by name."""
-    conn = get_connection()
-    rows = conn.execute(
-        """
-        SELECT DISTINCT r.uuid, r.name, r.club, r.gender,
-               rk.competition_category, rk.rider_category,
-               rk.rank, rk.points, rk.is_provisional
-        FROM riders r
-        JOIN rankings rk ON r.uuid = rk.rider_uuid
-        WHERE r.name LIKE ?
-        ORDER BY rk.competition_category
-        """,
-        [f"%{name}%"],
     ).fetchall()
     conn.close()
     return rows
