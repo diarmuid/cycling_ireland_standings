@@ -48,7 +48,8 @@ def init_db(conn: sqlite3.Connection | None = None) -> sqlite3.Connection:
             points TEXT,
             race_date TEXT,
             year INTEGER,
-            scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(rider_uuid, race_date, event_name, race_name, position, points)
         );
 
         CREATE TABLE IF NOT EXISTS scrape_meta (

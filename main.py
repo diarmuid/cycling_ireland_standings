@@ -121,10 +121,10 @@ def cmd_rider_details(args):
                 (details["name"], details["club"], uuid),
             )
 
-        # Insert race results
+        # Insert race results (skip duplicates)
         for rr in details["race_results"]:
             conn.execute(
-                """INSERT INTO race_results
+                """INSERT OR IGNORE INTO race_results
                    (rider_uuid, event_name, race_name, position,
                     points, race_date, year)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
@@ -214,6 +214,7 @@ def cmd_rider(args):
     print(f"  Rider: {r['name']}")
     print(f"  Club:  {r['club']}")
     print(f"  Gender: {r['gender']}")
+    print(f"  UUID:  {r['uuid']}")
     print(f"{'=' * 60}")
     print(f"{'Comp':>5s} {'Rank':>5s} {'Rider Cat':<8s} {'Pts':>5s}")
     print("-" * 30)
