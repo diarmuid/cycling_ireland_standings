@@ -229,13 +229,18 @@ def cmd_rider(args):
     # Show race results if available
     results = get_rider_race_results(args.name)
     if results:
-        print(f"  Recent race results:")
-        print(f"  {'Date':<15s} {'Event':<40s} {'Pos':<5s} {'Pts':>5s}")
-        print("  " + "-" * 65)
-        for rr in results[:10]:
+        print(f"  Race history:")
+        current_year = None
+        for rr in results:
+            if rr["year"] != current_year:
+                current_year = rr["year"]
+                print(f"\n  {'─' * 60}")
+                print(f"  {current_year}")
+                print(f"  {'Date':<15s} {'Event':<45s} {'Race':<30s} {'Pos':<5s} {'Pts':>5s}")
+                print(f"  {'─' * 60}")
             print(
-                f"  {rr['race_date']:<15s} {rr['event_name'][:38]:<40s}"
-                f" {rr['position']:<5s} {rr['points']:>5s}"
+                f"  {rr['race_date']:<15s} {rr['event_name'][:43]:<45s}"
+                f" {rr['race_name'][:28]:<30s} {rr['position']:<5s} {rr['points']:>5s}"
             )
     print()
 

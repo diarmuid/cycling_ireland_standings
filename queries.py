@@ -85,7 +85,7 @@ def get_stats():
 
 
 def get_rider_race_results(name: str):
-    """Get all race results for a rider by name."""
+    """Get all race results for a rider by name, grouped by year."""
     conn = get_connection()
     rows = conn.execute(
         """
@@ -94,7 +94,7 @@ def get_rider_race_results(name: str):
         FROM race_results rr
         JOIN riders r ON r.uuid = rr.rider_uuid
         WHERE r.name LIKE ?
-        ORDER BY rr.race_date DESC
+        ORDER BY rr.year DESC, rr.race_date DESC
         """,
         [f"%{name}%"],
     ).fetchall()
