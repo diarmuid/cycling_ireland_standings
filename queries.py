@@ -3,7 +3,7 @@
 from database import get_connection
 
 
-def find_riders_by_club(club_name: str, category: str | None = None):
+def find_riders_by_club(club_name: str, category: str | None = None, gender: str | None = None):
     """Find all riders matching a club name (case-insensitive)."""
     conn = get_connection()
     query = """
@@ -18,6 +18,9 @@ def find_riders_by_club(club_name: str, category: str | None = None):
     if category:
         query += " AND rk.competition_category = ?"
         params.append(category.upper())
+    if gender:
+        query += " AND r.gender = ?"
+        params.append(gender.upper())
 
     query += " ORDER BY rk.competition_category, rk.rank"
     rows = conn.execute(query, params).fetchall()
@@ -25,21 +28,23 @@ def find_riders_by_club(club_name: str, category: str | None = None):
     return rows
 
 
-def get_top_ranked(category: str, limit: int = 10):
+def get_top_ranked(category: str, limit: int = 10, gender: str | None = None):
     """Get the top-N ranked riders in a competition category."""
     conn = get_connection()
-    rows = conn.execute(
-        """
+    query = """
         SELECT r.name, r.club, r.gender,
                rk.rider_category, rk.rank, rk.points, rk.is_provisional
         FROM rankings rk
         JOIN riders r ON r.uuid = rk.rider_uuid
         WHERE rk.competition_category = ?
-        ORDER BY rk.rank ASC
-        LIMIT ?
-        """,
-        [category.upper(), limit],
-    ).fetchall()
+    """
+    params = [category.upper()]
+    if gender:
+        query += " AND r.gender = ?"
+        params.append(gender.upper())
+    query += " ORDER BY rk.rank ASC LIMIT ?"
+    params.append(limit)
+    rows = conn.execute(query, params).fetchall()
     conn.close()
     return rows
 

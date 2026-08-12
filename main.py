@@ -155,48 +155,51 @@ def cmd_rider_details(args):
 
 def cmd_top(args):
     """Show top ranked riders in a category."""
-    rows = get_top_ranked(args.category, args.limit)
+    rows = get_top_ranked(args.category, args.limit, gender=args.gender)
     if not rows:
         print(f"No rankings found for category '{args.category}'.")
         return
 
     label = CATEGORY_LABELS.get(args.category, args.category)
-    print(f"\n{'=' * 70}")
-    print(f"  Top {len(rows)} — {label}")
-    print(f"{'=' * 70}")
-    print(f"{'Rank':>5s} {'Name':<25s} {'Club':<30s} {'Cat':<8s} {'Pts':>5s}")
+    gender_tag = f" [{args.gender}]" if args.gender else ""
+    print(f"\n{'=' * 80}")
+    print(f"  Top {len(rows)} — {label}{gender_tag}")
+    print(f"{'=' * 80}")
+    print(f"{'Rank':>5s} {'Name':<25s} {'Club':<30s} {'Gender':<8s} {'Pts':>5s}")
     print("-" * 75)
     for row in rows:
         prov = "*" if row["is_provisional"] else " "
         print(
             f"{row['rank']:>5d} {row['name']:<25s} {row['club']:<30s}"
-            f" {row['rider_category']:<8s} {row['points']:>5s}{prov}"
+            f" {row['gender']:<8s} {row['points']:>5s}{prov}"
         )
     print()
 
 
 def cmd_club(args):
     """Find all riders from a given club."""
-    rows = find_riders_by_club(args.name, args.category)
+    rows = find_riders_by_club(args.name, args.category, gender=args.gender)
     if not rows:
         print(f"No riders found for club '{args.name}'.")
         return
 
-    print(f"\n{'=' * 80}")
+    print(f"\n{'=' * 90}")
     print(f"  Riders matching club: {args.name}")
     if args.category:
         print(f"  Category: {args.category}")
-    print(f"{'=' * 80}")
+    if args.gender:
+        print(f"  Gender: {args.gender}")
+    print(f"{'=' * 90}")
     print(
         f"{'Rank':>5s} {'Name':<25s} {'Club':<30s} "
-        f"{'Comp':<5s} {'Rider Cat':<8s} {'Pts':>5s}"
+        f"{'Gender':<8s} {'Comp':<5s} {'Pts':>5s}"
     )
-    print("-" * 80)
+    print("-" * 85)
     for row in rows:
         prov = "*" if row["is_provisional"] else " "
         print(
             f"{row['rank']:>5d} {row['name']:<25s} {row['club']:<30s} "
-            f"{row['competition_category']:<5s} {row['rider_category']:<8s} "
+            f"{row['gender']:<8s} {row['competition_category']:<5s} "
             f"{row['points']:>5s}{prov}"
         )
     print()
@@ -344,12 +347,14 @@ def main():
     p = sub.add_parser("top", help="Show top ranked riders")
     p.add_argument("--category", default="C1", help="Category (default: C1)")
     p.add_argument("--limit", type=int, default=10, help="Number of riders (default: 10)")
+    p.add_argument("--gender", choices=["MALE", "FEMALE"], help="Filter by gender")
     p.set_defaults(func=cmd_top)
 
     # club
     p = sub.add_parser("club", help="Find riders by club name")
     p.add_argument("name", help="Club name (case-insensitive, partial match)")
     p.add_argument("--category", help="Filter by competition category (e.g. C1, C3)")
+    p.add_argument("--gender", choices=["MALE", "FEMALE"], help="Filter by gender")
     p.set_defaults(func=cmd_club)
 
     # rider
