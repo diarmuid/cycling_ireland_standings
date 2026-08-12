@@ -165,13 +165,13 @@ def cmd_top(args):
     print(f"\n{'=' * 80}")
     print(f"  Top {len(rows)} — {label}{gender_tag} ({len(rows)} entries)")
     print(f"{'=' * 80}")
-    print(f"{'Rank':>5s} {'Name':<25s} {'Club':<30s} {'Gender':<8s} {'Pts':>5s}")
-    print("-" * 75)
+    print(f"{'Rank':>5s} {'Name':<25s} {'Club':<30s} {'Rider Cat':<10s} {'Gender':<8s} {'Pts':>5s}")
+    print("-" * 85)
     for row in rows:
         prov = "*" if row["is_provisional"] else " "
         print(
             f"{row['rank']:>5d} {row['name']:<25s} {row['club']:<30s}"
-            f" {row['gender']:<8s} {row['points']:>5s}{prov}"
+            f" {row['rider_category']:<10s} {row['gender']:<8s} {row['points']:>5s}{prov}"
         )
     print()
 
@@ -192,14 +192,14 @@ def cmd_club(args):
     print(f"{'=' * 90}")
     print(
         f"{'Rank':>5s} {'Name':<25s} {'Club':<30s} "
-        f"{'Gender':<8s} {'Comp':<5s} {'Pts':>5s}"
+        f"{'Rider Cat':<10s} {'Gender':<8s} {'Comp':<5s} {'Pts':>5s}"
     )
-    print("-" * 85)
+    print("-" * 95)
     for row in rows:
         prov = "*" if row["is_provisional"] else " "
         print(
             f"{row['rank']:>5d} {row['name']:<25s} {row['club']:<30s} "
-            f"{row['gender']:<8s} {row['competition_category']:<5s} "
+            f"{row['rider_category']:<10s} {row['gender']:<8s} {row['competition_category']:<5s} "
             f"{row['points']:>5s}{prov}"
         )
     print()
