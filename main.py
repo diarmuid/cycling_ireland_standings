@@ -163,7 +163,7 @@ def cmd_top(args):
     label = CATEGORY_LABELS.get(args.category, args.category)
     gender_tag = f" [{args.gender}]" if args.gender else ""
     print(f"\n{'=' * 80}")
-    print(f"  Top {len(rows)} — {label}{gender_tag}")
+    print(f"  Top {len(rows)} — {label}{gender_tag} ({len(rows)} entries)")
     print(f"{'=' * 80}")
     print(f"{'Rank':>5s} {'Name':<25s} {'Club':<30s} {'Gender':<8s} {'Pts':>5s}")
     print("-" * 75)
@@ -184,7 +184,7 @@ def cmd_club(args):
         return
 
     print(f"\n{'=' * 90}")
-    print(f"  Riders matching club: {args.name}")
+    print(f"  Riders matching club: {args.name} ({len(rows)} entries)")
     if args.category:
         print(f"  Category: {args.category}")
     if args.gender:
@@ -269,7 +269,7 @@ def cmd_rider(args):
     # Show race results (use club for disambiguation if there are duplicates)
     results = get_rider_race_results(args.name, club=args.club)
     if results:
-        print(f"  Race history:")
+        print(f"  Race history ({len(results)} entries):")
         current_year = None
         for rr in results:
             if rr["year"] != current_year:
