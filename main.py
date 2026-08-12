@@ -203,7 +203,7 @@ def cmd_club(args):
 
 
 def cmd_rider(args):
-    """Look up a rider by name."""
+    """Look up a rider by name, optionally fetching race results."""
     rows = get_rider_details(args.name, club=args.club)
     if not rows:
         msg = f"No rider found matching '{args.name}'"
@@ -219,6 +219,33 @@ def cmd_rider(args):
         by_uuid.setdefault(r["uuid"], {"name": r["name"], "club": r["club"], "gender": r["gender"], "rankings": []})
         by_uuid[r["uuid"]]["rankings"].append(r)
 
+    # If --results, scrape race data. Require exactly one match.
+    if args.results:
+        if len(by_uuid) > 1:
+            print(f"Error: '{args.name}' matches {len(by_uuid)} riders. Use --club to disambiguate:")
+            for uuid, info in by_uuid.items():
+                print(f"  {info['name']} — {info['club']} ({uuid})")
+            return
+
+        uuid = next(iter(by_uuid))
+        print(f"Fetching race results for {by_uuid[uuid]['name']}...")
+        details = scrape_rider_details(uuid)
+        if details:
+            conn = get_connection()
+            for rr in details["race_results"]:
+                conn.execute(
+                    """INSERT OR IGNORE INTO race_results
+                       (rider_uuid, event_name, race_name, position,
+                        points, race_date, year)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (uuid, rr["event_name"], rr["race_name"],
+                     rr["position"], rr["points"], rr["race_date"], rr["year"]),
+                )
+            conn.commit()
+            conn.close()
+            print(f"  Stored {len(details['race_results'])} results.\n")
+
+    # Display rider info
     for uuid, info in by_uuid.items():
         print(f"\n{'=' * 60}")
         print(f"  Rider: {info['name']}")
@@ -329,6 +356,7 @@ def main():
     p = sub.add_parser("rider", help="Look up a rider by name")
     p.add_argument("name", help="Rider name (case-insensitive, partial match)")
     p.add_argument("--club", help="Disambiguate by club name (partial match)")
+    p.add_argument("--results", action="store_true", help="Fetch and show race results")
     p.set_defaults(func=cmd_rider)
 
     # clubs

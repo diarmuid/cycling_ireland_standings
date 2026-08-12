@@ -106,7 +106,8 @@ def get_rider_details(name: str, club: str | None = None):
 
 
 def get_rider_race_results(name: str, club: str | None = None):
-    """Get all race results for a rider by name, optionally filtered by club."""
+    """Get all race results for a rider by name, optionally filtered by club.
+    Results sorted chronologically."""
     conn = get_connection()
     query = """
         SELECT rr.race_date, rr.event_name, rr.race_name,
@@ -119,7 +120,16 @@ def get_rider_race_results(name: str, club: str | None = None):
     if club:
         query += " AND r.club LIKE ?"
         params.append(f"%{club}%")
-    query += " ORDER BY rr.year DESC, rr.race_date DESC"
+    query += """
+        ORDER BY rr.year ASC,
+            CASE SUBSTR(rr.race_date, 4, 3)
+                WHEN 'Jan' THEN 1 WHEN 'Feb' THEN 2 WHEN 'Mar' THEN 3
+                WHEN 'Apr' THEN 4 WHEN 'May' THEN 5 WHEN 'Jun' THEN 6
+                WHEN 'Jul' THEN 7 WHEN 'Aug' THEN 8 WHEN 'Sep' THEN 9
+                WHEN 'Oct' THEN 10 WHEN 'Nov' THEN 11 WHEN 'Dec' THEN 12
+            END ASC,
+            CAST(SUBSTR(rr.race_date, 1, 2) AS INTEGER) ASC
+    """
     rows = conn.execute(query, params).fetchall()
     conn.close()
     return rows

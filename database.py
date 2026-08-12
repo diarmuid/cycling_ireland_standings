@@ -48,8 +48,7 @@ def init_db(conn: sqlite3.Connection | None = None) -> sqlite3.Connection:
             points TEXT,
             race_date TEXT,
             year INTEGER,
-            scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(rider_uuid, race_date, event_name, race_name, position, points)
+            scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE TABLE IF NOT EXISTS scrape_meta (
@@ -67,6 +66,9 @@ def init_db(conn: sqlite3.Connection | None = None) -> sqlite3.Connection:
 
         CREATE INDEX IF NOT EXISTS idx_race_results_rider
             ON race_results(rider_uuid);
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_race_results
+            ON race_results(rider_uuid, race_date, event_name, race_name, position, points);
     """)
 
     if close:
