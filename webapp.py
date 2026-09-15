@@ -16,7 +16,7 @@ from queries import (
     list_clubs,
 )
 
-HOST = "0.0.0.0"
+HOST = "127.0.0.1"
 PORT = 8090
 
 BASE = """
