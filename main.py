@@ -16,12 +16,14 @@ Usage:
 
 import argparse
 import sys
-import time
+import time as time_module
+from datetime import datetime, timedelta
 
-from config import CATEGORIES, CATEGORY_LABELS
+from config import CATEGORIES, CATEGORY_LABELS, DELTA_MAX_AGE
 from database import get_connection, init_db
 from queries import (
     find_riders_by_club,
+    get_club_standings,
     get_rider_details,
     get_rider_race_results,
     get_stats,
@@ -39,12 +41,36 @@ def cmd_scrape(args):
     conn = get_connection()
     init_db(conn)
 
+    delta = args.delta
+    max_age = args.max_age or DELTA_MAX_AGE
+    cutoff = datetime.now() - timedelta(seconds=max_age)
+
+    categories_to_scrape = []
+    for cat in CATEGORIES:
+        if delta:
+            row = conn.execute(
+                "SELECT MAX(scraped_at) FROM scrape_meta WHERE category = ?",
+                (cat,),
+            ).fetchone()
+            last_scraped = row[0]
+            if last_scraped:
+                last_dt = datetime.fromisoformat(last_scraped)
+                if last_dt >= cutoff:
+                    print(f"  {cat:>4s} ({CATEGORY_LABELS.get(cat, cat)}): skipped (scraped {last_dt})")
+                    continue
+        categories_to_scrape.append(cat)
+
+    if not categories_to_scrape:
+        print("All categories are up to date. Nothing to scrape.")
+        conn.close()
+        return
+
     def progress(cat, count):
         print(f"  {cat:>4s} ({CATEGORY_LABELS.get(cat, cat)}): {count} riders")
 
     print("Fetching rankings from Cycling Ireland...")
     results = scrape_all_rankings(
-        categories=CATEGORIES, delay=0.5, progress_callback=progress
+        categories=categories_to_scrape, delay=0.5, progress_callback=progress
     )
 
     total = 0
@@ -52,16 +78,20 @@ def cmd_scrape(args):
         if not riders:
             continue
 
+        # Replace old rankings for this category with fresh data
+        conn.execute(
+            "DELETE FROM rankings WHERE competition_category = ?",
+            (cat,),
+        )
+
         for r in riders:
-            # Upsert rider
             conn.execute(
                 """INSERT OR IGNORE INTO riders (uuid, name, club, gender)
                    VALUES (?, ?, ?, ?)""",
                 (r["uuid"], r["name"], r["club"], r["gender"]),
             )
-            # Insert ranking entry
             conn.execute(
-                """INSERT INTO rankings
+                """INSERT OR IGNORE INTO rankings
                    (rider_uuid, competition_category, rider_category,
                     rank, points, is_provisional)
                    VALUES (?, ?, ?, ?, ?, ?)""",
@@ -74,7 +104,7 @@ def cmd_scrape(args):
                     r["is_provisional"],
                 ),
             )
-            # Record scrape meta
+
         conn.execute(
             "INSERT INTO scrape_meta (category, rider_count) VALUES (?, ?)",
             (cat, len(riders)),
@@ -82,11 +112,63 @@ def cmd_scrape(args):
         total += len(riders)
 
     conn.commit()
+
+    scraped_uuids = set()
+    if args.with_results:
+        print("\nScraping race results for all riders from this scrape...")
+        for cat, riders in results.items():
+            for r in riders:
+                scraped_uuids.add(r["uuid"])
+        count = scrape_rider_results_for_uuids(conn, list(scraped_uuids))
+        print(f"Race results stored: {count}")
+
     conn.close()
-    print(f"\nDone! {total} rankings stored across {len(results)} categories.")
+    print(f"\nDone! {total} rankings stored across {len(categories_to_scrape)} categories.")
 
 
 # ── Rider Details ───────────────────────────────────────────────────────────
+
+
+def scrape_rider_results_for_uuids(conn, uuids, delay=0.5):
+    """Scrape race results for a list of rider UUIDs and store in the database.
+    Returns the total number of race results stored. Skips duplicates."""
+    total = 0
+    for i, uuid in enumerate(uuids):
+        details = scrape_rider_details(uuid)
+        if not details:
+            continue
+
+        if details["name"]:
+            conn.execute(
+                "UPDATE riders SET name=?, club=? WHERE uuid=?",
+                (details["name"], details["club"], uuid),
+            )
+
+        for rr in details["race_results"]:
+            conn.execute(
+                """INSERT OR IGNORE INTO race_results
+                   (rider_uuid, event_name, race_name, position,
+                    points, race_date, year)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    uuid,
+                    rr["event_name"],
+                    rr["race_name"],
+                    rr["position"],
+                    rr["points"],
+                    rr["race_date"],
+                    rr["year"],
+                ),
+            )
+        total += len(details["race_results"])
+
+        if (i + 1) % 50 == 0:
+            conn.commit()
+
+        time_module.sleep(delay)
+
+    conn.commit()
+    return total
 
 
 def cmd_rider_details(args):
@@ -108,44 +190,8 @@ def cmd_rider_details(args):
         conn.close()
         return
 
-    count = 0
-    for i, uuid in enumerate(uuids):
-        details = scrape_rider_details(uuid)
-        if not details:
-            continue
+    count = scrape_rider_results_for_uuids(conn, uuids)
 
-        # Update rider info if we have more data
-        if details["name"]:
-            conn.execute(
-                "UPDATE riders SET name=?, club=? WHERE uuid=?",
-                (details["name"], details["club"], uuid),
-            )
-
-        # Insert race results (skip duplicates)
-        for rr in details["race_results"]:
-            conn.execute(
-                """INSERT OR IGNORE INTO race_results
-                   (rider_uuid, event_name, race_name, position,
-                    points, race_date, year)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    uuid,
-                    rr["event_name"],
-                    rr["race_name"],
-                    rr["position"],
-                    rr["points"],
-                    rr["race_date"],
-                    rr["year"],
-                ),
-            )
-
-        count += len(details["race_results"])
-
-        if args.all and (i + 1) % 50 == 0:
-            conn.commit()
-            print(f"  {i + 1}/{len(uuids)} riders processed...")
-
-    conn.commit()
     conn.close()
     print(f"\nDone! {count} race results stored.")
 
@@ -201,6 +247,41 @@ def cmd_club(args):
             f"{row['rank']:>5d} {row['name']:<25s} {row['club']:<30s} "
             f"{row['rider_category']:<10s} {row['gender']:<8s} {row['competition_category']:<5s} "
             f"{row['points']:>5s}{prov}"
+        )
+    print()
+    print()
+
+
+def cmd_standings(args):
+    """Show club standings — all riders sorted by points descending."""
+    rows = get_club_standings(args.name, gender=args.gender)
+    if not rows:
+        print(f"No riders found for club '{args.name}'.")
+        return
+
+    total_riders = len(set(r["name"] for r in rows))
+    total_points = sum(int(r["points"]) for r in rows)
+    avg_points = total_points / total_riders if total_riders else 0
+    best_rank = min(r["rank"] for r in rows)
+
+    print(f"\n{'=' * 95}")
+    print(f"  Club standings: {rows[0]['club']}")
+    print(f"  Riders: {total_riders}  Total pts: {total_points}  "
+          f"Avg: {avg_points:.0f}  Best rank: #{best_rank}")
+    if args.gender:
+        print(f"  Gender: {args.gender}")
+    print(f"{'=' * 95}")
+    print(
+        f"{'Pts':>5s} {'Name':<25s} {'Rider Cat':<10s} "
+        f"{'Comp':<5s} {'Gender':<8s} {'Rank':>5s}"
+    )
+    print("-" * 95)
+    for row in rows:
+        prov = "*" if row["is_provisional"] else " "
+        print(
+            f"{row['points']:>5s}{prov} {row['name']:<25s} "
+            f"{row['rider_category']:<10s} {row['competition_category']:<5s} "
+            f"{row['gender']:<8s} {row['rank']:>5d}"
         )
     print()
 
@@ -332,6 +413,15 @@ def main():
 
     # scrape
     p = sub.add_parser("scrape", help="Scrape all rankings into the database")
+    p.add_argument("--delta", action="store_true", help="Skip categories scraped recently")
+    p.add_argument(
+        "--max-age", type=int,
+        help="Max age in seconds for delta scrape (default: 1 hour)",
+    )
+    p.add_argument(
+        "--with-results", action="store_true",
+        help="Also scrape race results for all riders",
+    )
     p.set_defaults(func=cmd_scrape)
 
     # rider-details
@@ -356,6 +446,12 @@ def main():
     p.add_argument("--category", help="Filter by competition category (e.g. C1, C3)")
     p.add_argument("--gender", choices=["MALE", "FEMALE"], help="Filter by gender")
     p.set_defaults(func=cmd_club)
+
+    # standings
+    p = sub.add_parser("standings", help="Club standings — riders sorted by points")
+    p.add_argument("name", help="Club name (case-insensitive, partial match)")
+    p.add_argument("--gender", choices=["MALE", "FEMALE"], help="Filter by gender")
+    p.set_defaults(func=cmd_standings)
 
     # rider
     p = sub.add_parser("rider", help="Look up a rider by name")

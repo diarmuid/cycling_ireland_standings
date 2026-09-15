@@ -154,3 +154,27 @@ def list_clubs():
     ).fetchall()
     conn.close()
     return rows
+
+
+def get_club_standings(club_name: str, gender: str | None = None):
+    """All riders in a club with their rankings, ordered by points descending.
+    Mixes categories together; each row shows the competition category."""
+    conn = get_connection()
+    query = """
+        SELECT r.name, r.club, r.gender,
+               rk.competition_category, rk.rider_category,
+               rk.rank, rk.points, rk.is_provisional
+        FROM riders r
+        JOIN rankings rk ON r.uuid = rk.rider_uuid
+        WHERE r.club LIKE ?
+          AND CAST(rk.points AS INTEGER) > 0
+    """
+    params = [f"%{club_name}%"]
+    if gender:
+        query += " AND r.gender = ?"
+        params.append(gender.upper())
+
+    query += " ORDER BY CAST(rk.points AS INTEGER) DESC, r.name ASC"
+    rows = conn.execute(query, params).fetchall()
+    conn.close()
+    return rows

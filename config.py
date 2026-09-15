@@ -25,3 +25,6 @@ CATEGORY_LABELS = {
 }
 
 DB_PATH = "rankings.db"
+
+# Delta scrape: skip categories scraped within this many seconds
+DELTA_MAX_AGE = 3600  # 1 hour
