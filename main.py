@@ -347,8 +347,11 @@ def cmd_rider(args):
             )
         print()
 
-    # Show race results (use club for disambiguation if there are duplicates)
-    results = get_rider_race_results(args.name, club=args.club)
+    # Show race results — if exactly one rider matched, use UUID for precision
+    uuid_param = None
+    if len(by_uuid) == 1:
+        uuid_param = next(iter(by_uuid))
+    results = get_rider_race_results(args.name, club=args.club, uuid=uuid_param)
     if results:
         print(f"  Race history ({len(results)} entries):")
         current_year = None

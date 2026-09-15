@@ -49,6 +49,29 @@ def get_top_ranked(category: str, limit: int = 10, gender: str | None = None):
     return rows
 
 
+def get_club_rankings(min_riders: int = 1):
+    """Rank clubs by total points across all riders with >0 points."""
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT r.club,
+               COUNT(DISTINCT r.uuid) AS rider_count,
+               SUM(CAST(rk.points AS INTEGER)) AS total_points,
+               AVG(CAST(rk.points AS INTEGER)) AS avg_points
+        FROM riders r
+        JOIN rankings rk ON r.uuid = rk.rider_uuid
+        WHERE r.club IS NOT NULL AND r.club != ''
+          AND CAST(rk.points AS INTEGER) > 0
+        GROUP BY r.club
+        HAVING COUNT(DISTINCT r.uuid) >= ?
+        ORDER BY total_points DESC
+        """,
+        (min_riders,),
+    ).fetchall()
+    conn.close()
+    return rows
+
+
 def get_stats():
     """Return summary statistics from the database."""
     conn = get_connection()
@@ -89,8 +112,8 @@ def get_stats():
     return stats
 
 
-def get_rider_details(name: str, club: str | None = None):
-    """Get rider profile and current rankings by name, optionally filtered by club."""
+def get_rider_details(name: str | None = None, club: str | None = None, uuid: str | None = None):
+    """Get rider profile and current rankings by name or UUID, optionally filtered by club."""
     conn = get_connection()
     query = """
         SELECT DISTINCT r.uuid, r.name, r.club, r.gender,
@@ -98,20 +121,26 @@ def get_rider_details(name: str, club: str | None = None):
                rk.rank, rk.points, rk.is_provisional
         FROM riders r
         JOIN rankings rk ON r.uuid = rk.rider_uuid
-        WHERE r.name LIKE ?
+        WHERE 1=1
     """
-    params = [f"%{name}%"]
-    if club:
-        query += " AND r.club LIKE ?"
-        params.append(f"%{club}%")
+    params: list = []
+    if uuid:
+        query += " AND r.uuid = ?"
+        params.append(uuid)
+    else:
+        query += " AND r.name LIKE ?"
+        params.append(f"%{name}%")
+        if club:
+            query += " AND r.club LIKE ?"
+            params.append(f"%{club}%")
     query += " ORDER BY r.club, rk.competition_category"
     rows = conn.execute(query, params).fetchall()
     conn.close()
     return rows
 
 
-def get_rider_race_results(name: str, club: str | None = None):
-    """Get all race results for a rider by name, optionally filtered by club.
+def get_rider_race_results(name: str | None = None, club: str | None = None, uuid: str | None = None):
+    """Get all race results for a rider by name or UUID, optionally filtered by club.
     Results sorted chronologically."""
     conn = get_connection()
     query = """
@@ -119,12 +148,18 @@ def get_rider_race_results(name: str, club: str | None = None):
                rr.position, rr.points, rr.year
         FROM race_results rr
         JOIN riders r ON r.uuid = rr.rider_uuid
-        WHERE r.name LIKE ?
+        WHERE 1=1
     """
-    params = [f"%{name}%"]
-    if club:
-        query += " AND r.club LIKE ?"
-        params.append(f"%{club}%")
+    params: list = []
+    if uuid:
+        query += " AND r.uuid = ?"
+        params.append(uuid)
+    else:
+        query += " AND r.name LIKE ?"
+        params.append(f"%{name}%")
+        if club:
+            query += " AND r.club LIKE ?"
+            params.append(f"%{club}%")
     query += """
         ORDER BY rr.year ASC,
             CASE SUBSTR(rr.race_date, 4, 3)
@@ -156,20 +191,21 @@ def list_clubs():
     return rows
 
 
-def get_club_standings(club_name: str, gender: str | None = None):
+def get_club_standings(club_name: str, gender: str | None = None, show_zero: bool = False):
     """All riders in a club with their rankings, ordered by points descending.
     Mixes categories together; each row shows the competition category."""
     conn = get_connection()
     query = """
-        SELECT r.name, r.club, r.gender,
+        SELECT r.uuid, r.name, r.club, r.gender,
                rk.competition_category, rk.rider_category,
                rk.rank, rk.points, rk.is_provisional
         FROM riders r
         JOIN rankings rk ON r.uuid = rk.rider_uuid
         WHERE r.club LIKE ?
-          AND CAST(rk.points AS INTEGER) > 0
     """
     params = [f"%{club_name}%"]
+    if not show_zero:
+        query += " AND CAST(rk.points AS INTEGER) > 0"
     if gender:
         query += " AND r.gender = ?"
         params.append(gender.upper())

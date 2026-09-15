@@ -2,10 +2,12 @@
 """Web interface for Cycling Ireland Rankings."""
 
 from bottle import route, run, request, template, redirect, static_file
+from datetime import datetime
 from config import CATEGORIES, CATEGORY_LABELS
 from database import get_connection
 from queries import (
     find_riders_by_club,
+    get_club_rankings,
     get_club_standings,
     get_rider_details,
     get_rider_race_results,
@@ -14,7 +16,7 @@ from queries import (
     list_clubs,
 )
 
-HOST = "localhost"
+HOST = "0.0.0.0"
 PORT = 8090
 
 BASE = """
@@ -32,9 +34,10 @@ BASE = """
       <a class="navbar-brand fw-bold" href="/">CI Rankings</a>
       <div class="navbar-nav">
         <a class="nav-link" href="/standings">Standings</a>
+        <a class="nav-link" href="/club-rankings">Clubs</a>
         <a class="nav-link" href="/top">Top</a>
         <a class="nav-link" href="/rider">Rider</a>
-        <a class="nav-link" href="/clubs">Clubs</a>
+        <a class="nav-link" href="/clubs">All Clubs</a>
         <a class="nav-link" href="/stats">Stats</a>
       </div>
     </div>
@@ -103,7 +106,13 @@ def standings_form():
           <option value="FEMALE">Female</option>
         </select>
       </div>
-      <div class="col-auto"><button class="btn btn-primary" type="submit">Go</button></div>
+      <div class="col-auto d-flex align-items-end">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" name="show_zero" id="show_zero">
+          <label class="form-check-label small" for="show_zero">Include 0-pt riders</label>
+        </div>
+      </div>
+      <div class="col-auto d-flex align-items-end"><button class="btn btn-primary" type="submit">Go</button></div>
     </form>
     """
     return _page(body)
@@ -113,7 +122,8 @@ def standings_form():
 def standings_results():
     club = request.forms.get("club", "")
     gender = request.forms.get("gender") or None
-    rows = get_club_standings(club, gender=gender)
+    show_zero = request.forms.get("show_zero") == "on"
+    rows = get_club_standings(club, gender=gender, show_zero=show_zero)
     if not rows:
         return _page(f'<div class="alert alert-warning">No riders found for "{club}".</div>')
 
@@ -124,7 +134,7 @@ def standings_results():
 
     trs = ""
     for r in rows:
-        trs += f"<tr><td class='text-end'>{r['points']}{_prov(r['is_provisional'])}</td><td>{r['name']}</td><td>{r['rider_category']}</td><td>{r['competition_category']}</td><td>{r['gender']}</td><td class='text-end'>{r['rank']}</td></tr>"
+        trs += f"<tr><td class='text-end fw-bold text-primary'>{r['points']}{_prov(r['is_provisional'])}</td><td><a href='/rider?uuid={r['uuid']}'>{r['name']}</a></td><td>{r['rider_category']}</td><td>{r['competition_category']}</td><td>{r['gender']}</td><td class='text-end'>{r['rank']}</td></tr>"
 
     gender_tag = f" ({gender})" if gender else ""
     body = f"""
@@ -136,7 +146,7 @@ def standings_results():
       <span class="badge bg-secondary">Best rank #{best_rank}</span>
     </div>
     <table class="table table-striped table-sm">
-      <thead class="table-dark"><tr><th class='text-end'>Pts</th><th>Name</th><th>Rider Cat</th><th>Comp</th><th>Gender</th><th class='text-end'>Rank</th></tr></thead>
+      <thead class="table-dark"><tr><th class='text-end'>Points</th><th>Name</th><th>Rider Cat</th><th>Comp</th><th>Gender</th><th class='text-end'>Rank</th></tr></thead>
       <tbody>{trs}</tbody>
     </table>
     <a href="/standings" class="btn btn-outline-secondary btn-sm">&larr; Back</a>
@@ -161,7 +171,13 @@ def top():
 
     trs = ""
     for r in rows:
-        trs += f"<tr><td class='text-end'>{r['rank']}</td><td>{r['name']}</td><td>{r['club'] or '-'}</td><td>{r['rider_category']}</td><td>{r['gender']}</td><td class='text-end'>{r['points']}{_prov(r['is_provisional'])}</td></tr>"
+        name_link = f"<a href='/rider?name={r['name'].replace(' ', '+')}'>{r['name']}</a>"
+        if r['club'] and r['club'] != '-':
+            club_escaped = r['club'].replace("'", "&apos;")
+            club_link = f"<a href='/standings' onclick=\"var f=document.createElement('form');f.method='POST';f.action='/standings';var i=document.createElement('input');i.name='club';i.value='{club_escaped}';f.appendChild(i);document.body.appendChild(f);f.submit();return false\">{r['club']}</a>"
+        else:
+            club_link = "-"
+        trs += f"<tr><td class='text-end'>{r['rank']}</td><td>{name_link}</td><td>{club_link}</td><td>{r['rider_category']}</td><td>{r['gender']}</td><td class='text-end'>{r['points']}{_prov(r['is_provisional'])}</td></tr>"
 
     body = f"""
     <h4>Top Ranked</h4>
@@ -194,6 +210,7 @@ def top():
 
 @route("/rider")
 def rider():
+    uuid = request.query.get("uuid") or None
     name = request.query.get("name", "")
     club = request.query.get("club") or None
 
@@ -206,49 +223,67 @@ def rider():
     </form>
     """
 
-    if name:
+    if uuid:
+        rows = get_rider_details(uuid=uuid)
+    elif name:
         rows = get_rider_details(name, club=club)
-        if not rows:
+    else:
+        rows = None
+
+    if uuid is None and name:
+        body = body.replace("{name}", name)
+
+    if not rows:
+        if name:
             body += "<div class='alert alert-warning'>No rider found.</div>"
         else:
-            by_uuid = {}
-            for r in rows:
-                by_uuid.setdefault(
-                    r["uuid"],
-                    {"name": r["name"], "club": r["club"], "gender": r["gender"], "rankings": []},
-                )
-                by_uuid[r["uuid"]]["rankings"].append(r)
+            body = body.replace("{name}", "")
+        return _page(body)
 
-            for uid, info in by_uuid.items():
-                rtrs = ""
-                for rk in info["rankings"]:
-                    rtrs += f"<tr><td>{rk['competition_category']}</td><td class='text-end'>{rk['rank']}</td><td>{rk['rider_category']}</td><td class='text-end'>{rk['points']}{_prov(rk['is_provisional'])}</td></tr>"
+    by_uuid = {}
+    for r in rows:
+        by_uuid.setdefault(
+            r["uuid"],
+            {"name": r["name"], "club": r["club"], "gender": r["gender"], "rankings": []},
+        )
+        by_uuid[r["uuid"]]["rankings"].append(r)
+
+    for uid, info in by_uuid.items():
+        rtrs = ""
+        for rk in info["rankings"]:
+            rtrs += f"<tr><td>{rk['competition_category']}</td><td class='text-end'>{rk['rank']}</td><td>{rk['rider_category']}</td><td class='text-end'>{rk['points']}{_prov(rk['is_provisional'])}</td></tr>"
+        body += f"""
+        <div class="card mb-3">
+          <div class="card-header"><strong>{info['name']}</strong> &mdash; {info['club'] or 'No club'} ({info['gender']})</div>
+          <div class="card-body p-0">
+            <table class="table table-striped mb-0 table-sm">
+              <thead class="table-dark"><tr><th>Comp</th><th class='text-end'>Rank</th><th>Rider Cat</th><th class='text-end'>Pts</th></tr></thead>
+              <tbody>{rtrs}</tbody>
+            </table>
+          </div>
+        </div>
+        """
+
+        results = get_rider_race_results(uuid=uid)
+        if results:
+            current_year = datetime.now().year
+            results = [rr for rr in results if rr["year"] == current_year]
+            if results:
+                rrs = ""
+                for rr in results:
+                    rrs += f"<tr><td>{rr['race_date']}</td><td>{rr['event_name']}</td><td>{rr['race_name']}</td><td>{rr['position']}</td><td class='text-end'>{rr['points']}</td></tr>"
                 body += f"""
-                <div class="card mb-3">
-                  <div class="card-header"><strong>{info['name']}</strong> &mdash; {info['club'] or 'No club'} ({info['gender']})</div>
-                  <div class="card-body p-0">
-                    <table class="table table-striped mb-0 table-sm">
-                      <thead class="table-dark"><tr><th>Comp</th><th class='text-end'>Rank</th><th>Rider Cat</th><th class='text-end'>Pts</th></tr></thead>
-                      <tbody>{rtrs}</tbody>
-                    </table>
-                  </div>
-                </div>
+                <h6 class="mt-2">Race History — {current_year} ({len(results)} results)</h6>
+                <table class="table table-sm table-striped">
+                  <thead class="table-dark"><tr><th>Date</th><th>Event</th><th>Race</th><th>Pos</th><th class='text-end'>Pts</th></tr></thead>
+                  <tbody>{rrs}</tbody>
+                </table>
                 """
 
-                results = get_rider_race_results(name, club=club)
-                if results:
-                    rrs = ""
-                    for rr in results:
-                        rrs += f"<tr><td>{rr['race_date']}</td><td>{rr['event_name']}</td><td>{rr['race_name']}</td><td>{rr['position']}</td><td class='text-end'>{rr['points']}</td></tr>"
-                    body += f"""
-                    <h6 class="mt-2">Race History ({len(results)} results)</h6>
-                    <table class="table table-sm table-striped">
-                      <thead class="table-dark"><tr><th>Date</th><th>Event</th><th>Race</th><th>Pos</th><th class='text-end'>Pts</th></tr></thead>
-                      <tbody>{rrs}</tbody>
-                    </table>
-                    """
-
-    body = body.replace("{name}", name)
+    if not uuid:
+        body = body.replace("{name}", name)
+    else:
+        body = body.replace("{name}", "")
     return _page(body)
 
 
@@ -305,12 +340,58 @@ def stats():
     return _page(body)
 
 
+# ── Club Rankings ───────────────────────────────────────────────────────────
+
+
+@route("/club-rankings")
+def club_rankings():
+    min_riders = int(request.query.get("min", 1))
+    rows = get_club_rankings(min_riders=min_riders)
+
+    trs = ""
+    for i, r in enumerate(rows, 1):
+        trs += (
+            f"<tr>"
+            f"<td class='text-end'>{i}</td>"
+            f"<td><a href='/standings' onclick=\"var f=document.createElement('form');f.method='POST';f.action='/standings';var i=document.createElement('input');i.name='club';i.value='{r['club'].replace(chr(39), '&apos;')}';f.appendChild(i);document.body.appendChild(f);f.submit();return false\">{r['club']}</a></td>"
+            f"<td class='text-end'>{r['rider_count']}</td>"
+            f"<td class='text-end'>{r['total_points']}</td>"
+            f"<td class='text-end'>{r['avg_points']:.0f}</td>"
+            f"</tr>"
+        )
+
+    body = f"""
+    <h4>Club Rankings</h4>
+    <form class="row g-2 mb-3">
+      <div class="col-auto">
+        <label class="form-label small">Min riders</label>
+        <input name="min" type="number" value="{min_riders}" class="form-control" style="width:80px" min="1">
+      </div>
+      <div class="col-auto d-flex align-items-end">
+        <button class="btn btn-primary" type="submit">Go</button>
+      </div>
+    </form>
+    <table class="table table-striped table-sm">
+      <thead class="table-dark">
+        <tr><th class='text-end'>#</th><th>Club</th><th class='text-end'>Riders</th><th class='text-end'>Total Pts</th><th class='text-end'>Avg Pts</th></tr>
+      </thead>
+      <tbody>{trs}</tbody>
+    </table>
+    """
+    return _page(body)
+
+
 # ── Main ────────────────────────────────────────────────────────────────────
 
 
 def main():
     print(f"Starting web app at http://{HOST}:{PORT}/")
-    run(host=HOST, port=PORT, debug=True)
+    try:
+        from waitress import serve
+        from bottle import default_app
+        serve(default_app(), host=HOST, port=PORT)
+    except ImportError:
+        run(host=HOST, port=PORT, debug=True)
 
 
 if __name__ == "__main__":
