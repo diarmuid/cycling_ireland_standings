@@ -28,7 +28,7 @@ BASE = """
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Cycling Ireland Rankings</title>
+  <title>Cycling Ireland Results 2026</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
   .sortable { cursor: pointer; user-select: none; }
@@ -49,7 +49,7 @@ BASE = """
 <body class="bg-light">
   <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
     <div class="container">
-      <a class="navbar-brand fw-bold" href="/">CI Rankings</a>
+      <a class="navbar-brand fw-bold" href="/">Cycling Ireland 2026 Rankings</a>
       <div class="navbar-nav nav-links">
         <a class="nav-link" href="/club-rankings">Clubs</a>
         <a class="nav-link" href="/races">Races</a>
@@ -299,9 +299,9 @@ def rider():
 
         body += f"""
         <div class="card mb-3">
-          <div class="card-header d-flex justify-content-between">
+          <div class="card-header d-flex justify-content-between bg-primary text-white">
             <span><strong>{info['name']}</strong> &mdash; {info['club'] or 'No club'} ({info['gender']})</span>
-            <span class="badge bg-primary fs-6">{year_pts} year pts</span>
+            <span class="badge bg-light text-primary fs-6">{year_pts} year pts</span>
           </div>
           <div class="card-body p-0">
             <div class="table-responsive">
@@ -317,7 +317,8 @@ def rider():
         if year_results:
             rrs = ""
             for rr in year_results:
-                rrs += f"<tr><td>{rr['race_date']}</td><td>{rr['event_name']}</td><td>{rr['race_name']}</td><td>{rr['position']}</td><td class='text-end'>{rr['points']}</td></tr>"
+                race_link = f"/races/detail?event={quote(rr['event_name'])}&race={quote(rr['race_name'])}&year={rr['year']}"
+                rrs += f"<tr><td>{rr['race_date']}</td><td><a href='{race_link}'>{rr['event_name']}</a></td><td><a href='{race_link}'>{rr['race_name']}</a></td><td>{rr['position']}</td><td class='text-end'>{rr['points']}</td></tr>"
             body += f"""
             <h6 class="mt-2">Race History — {datetime.now().year} ({len(year_results)} results)</h6>
             <div class="table-responsive">
