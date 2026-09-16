@@ -35,6 +35,9 @@ BASE = """
   .sortable .sort-arrow { opacity: .3; }
   .sortable:hover .sort-arrow { opacity: .6; }
   .sortable[data-asc] .sort-arrow { opacity: 1; }
+  .bar-cell { position: relative; min-width: 90px; height: 1.1rem; }
+  .bar-fill { display: block; position: absolute; left: 0; top: 0; bottom: 0; background: #0d6efd; opacity: .25; border-radius: .2rem; }
+  .bar-label { position: relative; display: inline-block; font-weight: 600; padding-left: .4rem; }
   @media (max-width: 768px) {
     .container { padding-left: .5rem; padding-right: .5rem; }
     .nav-links { display: flex; flex-wrap: wrap; gap: .25rem; }
@@ -389,16 +392,18 @@ def stats():
 def club_rankings():
     min_riders = int(request.query.get("min", 1))
     rows = get_club_rankings(min_riders=min_riders)
+    max_year = max((r["year_points"] for r in rows), default=0) or 1
 
     trs = ""
     for i, r in enumerate(rows, 1):
+        pct = r["year_points"] / max_year * 100
         trs += (
             f"<tr>"
             f"<td class='text-end'>{i}</td>"
             f"<td><a href='/standings/{quote(r['club'])}'>{r['club']}</a></td>"
             f"<td class='text-end'>{r['rider_count']}</td>"
             f"<td class='text-end'>{r['total_points']}</td>"
-            f"<td class='text-end'>{r['year_points']}</td>"
+            f"<td class='text-end'><div class='bar-cell'><span class='bar-fill' style='width:{pct:.0f}%'></span><span class='bar-label'>{r['year_points']}</span></div></td>"
             f"<td class='text-end'>{r['avg_points']:.0f}</td>"
             f"</tr>"
         )
@@ -426,7 +431,7 @@ def club_rankings():
     <div class="table-responsive">
     <table class="table table-striped table-sm">
       <thead class="table-dark">
-        <tr><th class='text-end'>#</th><th>Club</th><th class='text-end'>Riders</th><th class='text-end'>Rank Pts</th><th class='text-end'>Year Pts</th><th class='text-end'>Avg Pts</th></tr>
+        <tr><th class='text-end'>#</th><th>Club</th><th class='text-end'>Riders</th><th class='text-end'>Rank Pts</th><th>Year Pts</th><th class='text-end'>Avg Pts</th></tr>
       </thead>
       <tbody>{trs}</tbody>
     </table>
