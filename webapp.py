@@ -27,6 +27,12 @@ BASE = """
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Cycling Ireland Rankings</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+  .sortable { cursor: pointer; user-select: none; }
+  .sortable .sort-arrow { opacity: .3; }
+  .sortable:hover .sort-arrow { opacity: .6; }
+  .sortable[data-asc] .sort-arrow { opacity: 1; }
+  </style>
 </head>
 <body class="bg-light">
   <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
@@ -45,6 +51,34 @@ BASE = """
   <div class="container">
     {{!body}}
   </div>
+  <script>
+  document.addEventListener('click', function(e) {
+    var th = e.target.closest('.sortable');
+    if (!th) return;
+    var table = th.closest('table');
+    if (!table) return;
+    var tbody = table.querySelector('tbody');
+    var col = th.getAttribute('data-col');
+    var sortType = th.getAttribute('data-sort') || 'text';
+    var asc = th.getAttribute('data-asc') !== '1';
+    var rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.sort(function(a, b) {
+      var va = (a.getAttribute('data-' + col) || '').toLowerCase();
+      var vb = (b.getAttribute('data-' + col) || '').toLowerCase();
+      if (sortType === 'num') { va = parseFloat(va) || 0; vb = parseFloat(vb) || 0; }
+      return va < vb ? -1 : va > vb ? 1 : 0;
+    });
+    if (!asc) rows.reverse();
+    rows.forEach(function(r) { tbody.appendChild(r); });
+    table.querySelectorAll('.sortable').forEach(function(h) {
+      h.removeAttribute('data-asc');
+      h.querySelectorAll('.sort-arrow').forEach(function(s) { s.textContent = '\\25B4'; });
+    });
+    var arrow = th.querySelector('.sort-arrow');
+    arrow.textContent = asc ? '\\25B2' : '\\25BE';
+    th.setAttribute('data-asc', asc ? '1' : '0');
+  });
+  </script>
 </body>
 </html>
 """
@@ -133,8 +167,10 @@ def standings_results():
     best_rank = min(r["rank"] for r in rows)
 
     trs = ""
+    total_year_pts = 0
     for r in rows:
-        trs += f"<tr><td class='text-end fw-bold text-primary'>{r['points']}{_prov(r['is_provisional'])}</td><td><a href='/rider?uuid={r['uuid']}'>{r['name']}</a></td><td>{r['rider_category']}</td><td>{r['competition_category']}</td><td>{r['gender']}</td><td class='text-end'>{r['rank']}</td></tr>"
+        total_year_pts += r["year_points"]
+        trs += f"<tr data-name='{r['name']}' data-rank='{int(r['points'])}' data-year='{r['year_points']}' data-ridcat='{r['rider_category']}' data-comp='{r['competition_category']}' data-gender='{r['gender']}' data-ranknum='{r['rank']}'><td><a href='/rider?uuid={r['uuid']}'>{r['name']}</a></td><td class='text-end fw-bold text-primary'>{r['points']}{_prov(r['is_provisional'])}</td><td class='text-end fw-semibold'>{r['year_points']}</td><td>{r['rider_category']}</td><td>{r['competition_category']}</td><td>{r['gender']}</td><td class='text-end'>{r['rank']}</td></tr>"
 
     gender_tag = f" ({gender})" if gender else ""
     body = f"""
@@ -142,11 +178,20 @@ def standings_results():
     <div class="mb-3">
       <span class="badge bg-secondary me-2">{total_riders} riders</span>
       <span class="badge bg-secondary me-2">{total_points} total pts</span>
+      <span class="badge bg-secondary me-2">{total_year_pts} year pts</span>
       <span class="badge bg-secondary me-2">Avg {avg_points:.0f}</span>
       <span class="badge bg-secondary">Best rank #{best_rank}</span>
     </div>
-    <table class="table table-striped table-sm">
-      <thead class="table-dark"><tr><th class='text-end'>Points</th><th>Name</th><th>Rider Cat</th><th>Comp</th><th>Gender</th><th class='text-end'>Rank</th></tr></thead>
+    <table id="standings-table" class="table table-striped table-sm">
+      <thead class="table-dark"><tr>
+        <th class='sortable' data-sort='text' data-col='name'>Name <span class="sort-arrow"></span></th>
+        <th class='text-end sortable' data-sort='num' data-col='rank'>Rank Pts <span class="sort-arrow"></span></th>
+        <th class='text-end sortable' data-sort='num' data-col='year'>Year Pts <span class="sort-arrow"></span></th>
+        <th class='sortable' data-sort='text' data-col='ridcat'>Rider Cat <span class="sort-arrow"></span></th>
+        <th class='sortable' data-sort='text' data-col='comp'>Comp <span class="sort-arrow"></span></th>
+        <th class='sortable' data-sort='text' data-col='gender'>Gender <span class="sort-arrow"></span></th>
+        <th class='text-end sortable' data-sort='num' data-col='ranknum'>Rank <span class="sort-arrow"></span></th>
+      </tr></thead>
       <tbody>{trs}</tbody>
     </table>
     <a href="/standings" class="btn btn-outline-secondary btn-sm">&larr; Back</a>
@@ -252,9 +297,17 @@ def rider():
         rtrs = ""
         for rk in info["rankings"]:
             rtrs += f"<tr><td>{rk['competition_category']}</td><td class='text-end'>{rk['rank']}</td><td>{rk['rider_category']}</td><td class='text-end'>{rk['points']}{_prov(rk['is_provisional'])}</td></tr>"
+
+        results = get_rider_race_results(uuid=uid)
+        year_results = [rr for rr in results if rr["year"] == datetime.now().year]
+        year_pts = sum(int(rr["points"]) for rr in year_results)
+
         body += f"""
         <div class="card mb-3">
-          <div class="card-header"><strong>{info['name']}</strong> &mdash; {info['club'] or 'No club'} ({info['gender']})</div>
+          <div class="card-header d-flex justify-content-between">
+            <span><strong>{info['name']}</strong> &mdash; {info['club'] or 'No club'} ({info['gender']})</span>
+            <span class="badge bg-primary fs-6">{year_pts} year pts</span>
+          </div>
           <div class="card-body p-0">
             <table class="table table-striped mb-0 table-sm">
               <thead class="table-dark"><tr><th>Comp</th><th class='text-end'>Rank</th><th>Rider Cat</th><th class='text-end'>Pts</th></tr></thead>
@@ -264,21 +317,17 @@ def rider():
         </div>
         """
 
-        results = get_rider_race_results(uuid=uid)
-        if results:
-            current_year = datetime.now().year
-            results = [rr for rr in results if rr["year"] == current_year]
-            if results:
-                rrs = ""
-                for rr in results:
-                    rrs += f"<tr><td>{rr['race_date']}</td><td>{rr['event_name']}</td><td>{rr['race_name']}</td><td>{rr['position']}</td><td class='text-end'>{rr['points']}</td></tr>"
-                body += f"""
-                <h6 class="mt-2">Race History — {current_year} ({len(results)} results)</h6>
-                <table class="table table-sm table-striped">
-                  <thead class="table-dark"><tr><th>Date</th><th>Event</th><th>Race</th><th>Pos</th><th class='text-end'>Pts</th></tr></thead>
-                  <tbody>{rrs}</tbody>
-                </table>
-                """
+        if year_results:
+            rrs = ""
+            for rr in year_results:
+                rrs += f"<tr><td>{rr['race_date']}</td><td>{rr['event_name']}</td><td>{rr['race_name']}</td><td>{rr['position']}</td><td class='text-end'>{rr['points']}</td></tr>"
+            body += f"""
+            <h6 class="mt-2">Race History — {datetime.now().year} ({len(year_results)} results)</h6>
+            <table class="table table-sm table-striped">
+              <thead class="table-dark"><tr><th>Date</th><th>Event</th><th>Race</th><th>Pos</th><th class='text-end'>Pts</th></tr></thead>
+              <tbody>{rrs}</tbody>
+            </table>
+            """
 
     if not uuid:
         body = body.replace("{name}", name)
@@ -356,6 +405,7 @@ def club_rankings():
             f"<td><a href='/standings' onclick=\"var f=document.createElement('form');f.method='POST';f.action='/standings';var i=document.createElement('input');i.name='club';i.value='{r['club'].replace(chr(39), '&apos;')}';f.appendChild(i);document.body.appendChild(f);f.submit();return false\">{r['club']}</a></td>"
             f"<td class='text-end'>{r['rider_count']}</td>"
             f"<td class='text-end'>{r['total_points']}</td>"
+            f"<td class='text-end'>{r['year_points']}</td>"
             f"<td class='text-end'>{r['avg_points']:.0f}</td>"
             f"</tr>"
         )
@@ -373,7 +423,7 @@ def club_rankings():
     </form>
     <table class="table table-striped table-sm">
       <thead class="table-dark">
-        <tr><th class='text-end'>#</th><th>Club</th><th class='text-end'>Riders</th><th class='text-end'>Total Pts</th><th class='text-end'>Avg Pts</th></tr>
+        <tr><th class='text-end'>#</th><th>Club</th><th class='text-end'>Riders</th><th class='text-end'>Rank Pts</th><th class='text-end'>Year Pts</th><th class='text-end'>Avg Pts</th></tr>
       </thead>
       <tbody>{trs}</tbody>
     </table>

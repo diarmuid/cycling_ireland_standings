@@ -50,23 +50,35 @@ def get_top_ranked(category: str, limit: int = 10, gender: str | None = None):
 
 
 def get_club_rankings(min_riders: int = 1):
-    """Rank clubs by total points across all riders with >0 points."""
+    """Rank clubs by points across riders. total_points is current ranking points,
+    year_points is the sum of current-year race results (captures pre-upgrade points)."""
     conn = get_connection()
+    current_year = conn.execute(
+        "SELECT CAST(strftime('%Y', 'now') AS INTEGER)"
+    ).fetchone()[0]
     rows = conn.execute(
         """
         SELECT r.club,
                COUNT(DISTINCT r.uuid) AS rider_count,
                SUM(CAST(rk.points AS INTEGER)) AS total_points,
-               AVG(CAST(rk.points AS INTEGER)) AS avg_points
+               AVG(CAST(rk.points AS INTEGER)) AS avg_points,
+               SUM(COALESCE((
+                   SELECT SUM(CAST(rr.points AS INTEGER))
+                   FROM race_results rr
+                   WHERE rr.rider_uuid = r.uuid AND rr.year = ?
+               ), 0)) AS year_points
         FROM riders r
         JOIN rankings rk ON r.uuid = rk.rider_uuid
         WHERE r.club IS NOT NULL AND r.club != ''
-          AND CAST(rk.points AS INTEGER) > 0
+          AND (CAST(rk.points AS INTEGER) > 0
+               OR COALESCE((SELECT SUM(CAST(rr.points AS INTEGER))
+                   FROM race_results rr
+                   WHERE rr.rider_uuid = r.uuid AND rr.year = ?), 0) > 0)
         GROUP BY r.club
         HAVING COUNT(DISTINCT r.uuid) >= ?
-        ORDER BY total_points DESC
+        ORDER BY year_points DESC, total_points DESC
         """,
-        (min_riders,),
+        (current_year, current_year, min_riders),
     ).fetchall()
     conn.close()
     return rows
@@ -193,24 +205,38 @@ def list_clubs():
 
 def get_club_standings(club_name: str, gender: str | None = None, show_zero: bool = False):
     """All riders in a club with their rankings, ordered by points descending.
-    Mixes categories together; each row shows the competition category."""
+    Mixes categories together; each row shows the competition category.
+    year_points is the sum of current-year race results (captures pre-upgrade points)."""
     conn = get_connection()
+    current_year = conn.execute(
+        "SELECT CAST(strftime('%Y', 'now') AS INTEGER)"
+    ).fetchone()[0]
     query = """
         SELECT r.uuid, r.name, r.club, r.gender,
                rk.competition_category, rk.rider_category,
-               rk.rank, rk.points, rk.is_provisional
+               rk.rank, rk.points, rk.is_provisional,
+               COALESCE((
+                   SELECT SUM(CAST(rr.points AS INTEGER))
+                   FROM race_results rr
+                   WHERE rr.rider_uuid = r.uuid AND rr.year = ?
+               ), 0) AS year_points
         FROM riders r
         JOIN rankings rk ON r.uuid = rk.rider_uuid
         WHERE r.club LIKE ?
     """
-    params = [f"%{club_name}%"]
+    params: list = [current_year]
+    params.append(f"%{club_name}%")
     if not show_zero:
-        query += " AND CAST(rk.points AS INTEGER) > 0"
+        query += (" AND (CAST(rk.points AS INTEGER) > 0"
+                  " OR COALESCE((SELECT SUM(CAST(rr.points AS INTEGER))"
+                  " FROM race_results rr"
+                  " WHERE rr.rider_uuid = r.uuid AND rr.year = ?), 0) > 0)")
+        params.append(current_year)
     if gender:
         query += " AND r.gender = ?"
         params.append(gender.upper())
 
-    query += " ORDER BY CAST(rk.points AS INTEGER) DESC, r.name ASC"
+    query += " ORDER BY year_points DESC, CAST(rk.points AS INTEGER) DESC, r.name ASC"
     rows = conn.execute(query, params).fetchall()
     conn.close()
     return rows

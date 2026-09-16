@@ -253,7 +253,7 @@ def cmd_club(args):
 
 
 def cmd_standings(args):
-    """Show club standings — all riders sorted by points descending."""
+    """Show club standings — all riders sorted by year points descending."""
     rows = get_club_standings(args.name, gender=args.gender)
     if not rows:
         print(f"No riders found for club '{args.name}'.")
@@ -261,25 +261,26 @@ def cmd_standings(args):
 
     total_riders = len(set(r["name"] for r in rows))
     total_points = sum(int(r["points"]) for r in rows)
+    total_year_pts = sum(r["year_points"] for r in rows)
     avg_points = total_points / total_riders if total_riders else 0
     best_rank = min(r["rank"] for r in rows)
 
-    print(f"\n{'=' * 95}")
+    print(f"\n{'=' * 105}")
     print(f"  Club standings: {rows[0]['club']}")
-    print(f"  Riders: {total_riders}  Total pts: {total_points}  "
-          f"Avg: {avg_points:.0f}  Best rank: #{best_rank}")
+    print(f"  Riders: {total_riders}  Rank pts: {total_points}  "
+          f"Year pts: {total_year_pts}  Avg: {avg_points:.0f}  Best rank: #{best_rank}")
     if args.gender:
         print(f"  Gender: {args.gender}")
-    print(f"{'=' * 95}")
+    print(f"{'=' * 105}")
     print(
-        f"{'Pts':>5s} {'Name':<25s} {'Rider Cat':<10s} "
+        f"{'RankPts':>7s} {'YearPts':>7s} {'Name':<25s} {'Rider Cat':<10s} "
         f"{'Comp':<5s} {'Gender':<8s} {'Rank':>5s}"
     )
-    print("-" * 95)
+    print("-" * 105)
     for row in rows:
         prov = "*" if row["is_provisional"] else " "
         print(
-            f"{row['points']:>5s}{prov} {row['name']:<25s} "
+            f"{row['points']:>7s}{prov} {row['year_points']:>6d} {row['name']:<25s} "
             f"{row['rider_category']:<10s} {row['competition_category']:<5s} "
             f"{row['gender']:<8s} {row['rank']:>5d}"
         )
