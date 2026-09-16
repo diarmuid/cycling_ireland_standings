@@ -3,17 +3,20 @@
 
 from bottle import route, run, request, template, redirect, static_file
 from datetime import datetime
+from urllib.parse import quote
 from config import CATEGORIES, CATEGORY_LABELS
 from database import get_connection
 from queries import (
     find_riders_by_club,
     get_club_rankings,
     get_club_standings,
+    get_race_riders,
     get_rider_details,
     get_rider_race_results,
     get_stats,
     get_top_ranked,
     list_clubs,
+    list_races,
 )
 
 HOST = "127.0.0.1"
@@ -32,18 +35,23 @@ BASE = """
   .sortable .sort-arrow { opacity: .3; }
   .sortable:hover .sort-arrow { opacity: .6; }
   .sortable[data-asc] .sort-arrow { opacity: 1; }
+  @media (max-width: 768px) {
+    .container { padding-left: .5rem; padding-right: .5rem; }
+    .nav-links { display: flex; flex-wrap: wrap; gap: .25rem; }
+    .nav-links .nav-link { padding: .25rem .5rem; font-size: .9rem; }
+    td, th { font-size: .8rem; padding: .25rem .3rem; }
+  }
   </style>
 </head>
 <body class="bg-light">
   <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
     <div class="container">
       <a class="navbar-brand fw-bold" href="/">CI Rankings</a>
-      <div class="navbar-nav">
-        <a class="nav-link" href="/standings">Standings</a>
+      <div class="navbar-nav nav-links">
         <a class="nav-link" href="/club-rankings">Clubs</a>
+        <a class="nav-link" href="/races">Races</a>
         <a class="nav-link" href="/top">Top</a>
         <a class="nav-link" href="/rider">Rider</a>
-        <a class="nav-link" href="/clubs">All Clubs</a>
         <a class="nav-link" href="/stats">Stats</a>
       </div>
     </div>
@@ -72,10 +80,10 @@ BASE = """
     rows.forEach(function(r) { tbody.appendChild(r); });
     table.querySelectorAll('.sortable').forEach(function(h) {
       h.removeAttribute('data-asc');
-      h.querySelectorAll('.sort-arrow').forEach(function(s) { s.textContent = '\\25B4'; });
+      h.querySelectorAll('.sort-arrow').forEach(function(s) { s.textContent = '\\u25B4'; });
     });
     var arrow = th.querySelector('.sort-arrow');
-    arrow.textContent = asc ? '\\25B2' : '\\25BE';
+    arrow.textContent = asc ? '\\u25B2' : '\\u25BE';
     th.setAttribute('data-asc', asc ? '1' : '0');
   });
   </script>
@@ -127,49 +135,23 @@ def home():
 # ── Standings ───────────────────────────────────────────────────────────────
 
 
-@route("/standings", method="GET")
-def standings_form():
-    body = """
-    <h4>Club Standings</h4>
-    <form action="/standings" method="POST" class="row g-2 mb-3">
-      <div class="col-auto"><input name="club" class="form-control" placeholder="Club name" required></div>
-      <div class="col-auto">
-        <select name="gender" class="form-select">
-          <option value="">All genders</option>
-          <option value="MALE">Male</option>
-          <option value="FEMALE">Female</option>
-        </select>
-      </div>
-      <div class="col-auto d-flex align-items-end">
-        <div class="form-check">
-          <input class="form-check-input" type="checkbox" name="show_zero" id="show_zero">
-          <label class="form-check-label small" for="show_zero">Include 0-pt riders</label>
-        </div>
-      </div>
-      <div class="col-auto d-flex align-items-end"><button class="btn btn-primary" type="submit">Go</button></div>
-    </form>
-    """
-    return _page(body)
-
-
-@route("/standings", method="POST")
-def standings_results():
-    club = request.forms.get("club", "")
-    gender = request.forms.get("gender") or None
-    show_zero = request.forms.get("show_zero") == "on"
+@route("/standings/<clubname>", method="GET")
+def standings_results(clubname):
+    club = clubname
+    gender = request.query.get("gender") or None
+    show_zero = request.query.get("show_zero") == "on"
     rows = get_club_standings(club, gender=gender, show_zero=show_zero)
     if not rows:
         return _page(f'<div class="alert alert-warning">No riders found for "{club}".</div>')
 
     total_riders = len(set(r["name"] for r in rows))
     total_points = sum(int(r["points"]) for r in rows)
+    total_year_pts = sum(r["year_points"] for r in rows)
     avg_points = total_points / total_riders if total_riders else 0
     best_rank = min(r["rank"] for r in rows)
 
     trs = ""
-    total_year_pts = 0
     for r in rows:
-        total_year_pts += r["year_points"]
         trs += f"<tr data-name='{r['name']}' data-rank='{int(r['points'])}' data-year='{r['year_points']}' data-ridcat='{r['rider_category']}' data-comp='{r['competition_category']}' data-gender='{r['gender']}' data-ranknum='{r['rank']}'><td><a href='/rider?uuid={r['uuid']}'>{r['name']}</a></td><td class='text-end fw-bold text-primary'>{r['points']}{_prov(r['is_provisional'])}</td><td class='text-end fw-semibold'>{r['year_points']}</td><td>{r['rider_category']}</td><td>{r['competition_category']}</td><td>{r['gender']}</td><td class='text-end'>{r['rank']}</td></tr>"
 
     gender_tag = f" ({gender})" if gender else ""
@@ -182,6 +164,7 @@ def standings_results():
       <span class="badge bg-secondary me-2">Avg {avg_points:.0f}</span>
       <span class="badge bg-secondary">Best rank #{best_rank}</span>
     </div>
+    <div class="table-responsive">
     <table id="standings-table" class="table table-striped table-sm">
       <thead class="table-dark"><tr>
         <th class='sortable' data-sort='text' data-col='name'>Name <span class="sort-arrow"></span></th>
@@ -194,7 +177,8 @@ def standings_results():
       </tr></thead>
       <tbody>{trs}</tbody>
     </table>
-    <a href="/standings" class="btn btn-outline-secondary btn-sm">&larr; Back</a>
+    </div>
+    <a href="/club-rankings" class="btn btn-outline-secondary btn-sm">&larr; All clubs</a>
     """
     return _page(body)
 
@@ -218,11 +202,10 @@ def top():
     for r in rows:
         name_link = f"<a href='/rider?name={r['name'].replace(' ', '+')}'>{r['name']}</a>"
         if r['club'] and r['club'] != '-':
-            club_escaped = r['club'].replace("'", "&apos;")
-            club_link = f"<a href='/standings' onclick=\"var f=document.createElement('form');f.method='POST';f.action='/standings';var i=document.createElement('input');i.name='club';i.value='{club_escaped}';f.appendChild(i);document.body.appendChild(f);f.submit();return false\">{r['club']}</a>"
+            club_link = f"<a href='/standings/{quote(r['club'])}'>{r['club']}</a>"
         else:
             club_link = "-"
-        trs += f"<tr><td class='text-end'>{r['rank']}</td><td>{name_link}</td><td>{club_link}</td><td>{r['rider_category']}</td><td>{r['gender']}</td><td class='text-end'>{r['points']}{_prov(r['is_provisional'])}</td></tr>"
+        trs += f"<tr data-pos='{r['rank']}' data-rank='{int(r['points'])}' data-name='{r['name']}' data-club='{r['club'] or ''}' data-ridcat='{r['rider_category']}' data-gender='{r['gender']}'><td class='text-end'>{r['rank']}</td><td>{name_link}</td><td>{club_link}</td><td>{r['rider_category']}</td><td>{r['gender']}</td><td class='text-end'>{r['points']}{_prov(r['is_provisional'])}</td></tr>"
 
     body = f"""
     <h4>Top Ranked</h4>
@@ -242,10 +225,19 @@ def top():
       </div>
       <div class="col-auto"><button class="btn btn-primary" type="submit">Go</button></div>
     </form>
+    <div class="table-responsive">
     <table class="table table-striped table-sm">
-      <thead class="table-dark"><tr><th class='text-end'>Rank</th><th>Name</th><th>Club</th><th>Rider Cat</th><th>Gender</th><th class='text-end'>Pts</th></tr></thead>
+      <thead class="table-dark"><tr>
+<th class='text-end sortable' data-sort='num' data-col='pos'>Rank <span class="sort-arrow"></span></th>
+        <th class='sortable' data-sort='text' data-col='name'>Name <span class="sort-arrow"></span></th>
+        <th class='sortable' data-sort='text' data-col='club'>Club <span class="sort-arrow"></span></th>
+        <th class='sortable' data-sort='text' data-col='ridcat'>Rider Cat <span class="sort-arrow"></span></th>
+        <th class='sortable' data-sort='text' data-col='gender'>Gender <span class="sort-arrow"></span></th>
+        <th class='text-end sortable' data-sort='num' data-col='rank'>Pts <span class="sort-arrow"></span></th>
+      </tr></thead>
       <tbody>{trs}</tbody>
     </table>
+    </div>
     """
     return _page(body)
 
@@ -300,7 +292,7 @@ def rider():
 
         results = get_rider_race_results(uuid=uid)
         year_results = [rr for rr in results if rr["year"] == datetime.now().year]
-        year_pts = sum(int(rr["points"]) for rr in year_results)
+        year_pts = sum(int(rr["points"].rstrip("*")) for rr in year_results)
 
         body += f"""
         <div class="card mb-3">
@@ -309,10 +301,12 @@ def rider():
             <span class="badge bg-primary fs-6">{year_pts} year pts</span>
           </div>
           <div class="card-body p-0">
+            <div class="table-responsive">
             <table class="table table-striped mb-0 table-sm">
               <thead class="table-dark"><tr><th>Comp</th><th class='text-end'>Rank</th><th>Rider Cat</th><th class='text-end'>Pts</th></tr></thead>
               <tbody>{rtrs}</tbody>
             </table>
+            </div>
           </div>
         </div>
         """
@@ -323,10 +317,12 @@ def rider():
                 rrs += f"<tr><td>{rr['race_date']}</td><td>{rr['event_name']}</td><td>{rr['race_name']}</td><td>{rr['position']}</td><td class='text-end'>{rr['points']}</td></tr>"
             body += f"""
             <h6 class="mt-2">Race History — {datetime.now().year} ({len(year_results)} results)</h6>
+            <div class="table-responsive">
             <table class="table table-sm table-striped">
               <thead class="table-dark"><tr><th>Date</th><th>Event</th><th>Race</th><th>Pos</th><th class='text-end'>Pts</th></tr></thead>
               <tbody>{rrs}</tbody>
             </table>
+            </div>
             """
 
     if not uuid:
@@ -343,19 +339,16 @@ def rider():
 def clubs():
     rows = list_clubs()
     trs = "".join(
-        f'<tr><td>{i}</td><td><a href="/standings" onclick="document.forms[0].club.value=\'{r["club"]}\';document.forms[0].submit();return false">{r["club"]}</a></td><td class="text-end">{r["rider_count"]}</td></tr>'
+        f'<tr><td>{i}</td><td><a href="/standings/{quote(r["club"])}">{r["club"]}</a></td><td class="text-end">{r["rider_count"]}</td></tr>'
         for i, r in enumerate(rows, 1)
     )
 
     body = f"""
     <h4>Clubs ({len(rows)} total)</h4>
-    <form action="/standings" method="POST" style="display:none">
-      <input name="club">
-    </form>
-    <table class="table table-striped table-sm">
+    <div class="table-responsive"><table class="table table-striped table-sm">
       <thead class="table-dark"><tr><th>#</th><th>Club</th><th class='text-end'>Riders</th></tr></thead>
       <tbody>{trs}</tbody>
-    </table>
+    </table></div>
     """
     return _page(body)
 
@@ -402,7 +395,7 @@ def club_rankings():
         trs += (
             f"<tr>"
             f"<td class='text-end'>{i}</td>"
-            f"<td><a href='/standings' onclick=\"var f=document.createElement('form');f.method='POST';f.action='/standings';var i=document.createElement('input');i.name='club';i.value='{r['club'].replace(chr(39), '&apos;')}';f.appendChild(i);document.body.appendChild(f);f.submit();return false\">{r['club']}</a></td>"
+            f"<td><a href='/standings/{quote(r['club'])}'>{r['club']}</a></td>"
             f"<td class='text-end'>{r['rider_count']}</td>"
             f"<td class='text-end'>{r['total_points']}</td>"
             f"<td class='text-end'>{r['year_points']}</td>"
@@ -412,7 +405,16 @@ def club_rankings():
 
     body = f"""
     <h4>Club Rankings</h4>
-    <form class="row g-2 mb-3">
+    <form class="row g-2 mb-3" onsubmit="return false">
+      <div class="col-auto">
+        <input id="club-search" class="form-control" placeholder="Search a club..." required>
+      </div>
+      <div class="col-auto d-flex align-items-end">
+        <button class="btn btn-primary" type="submit"
+          onclick="window.location='/standings/'+encodeURIComponent(document.getElementById('club-search').value);return false;">
+          Standings
+        </button>
+      </div>
       <div class="col-auto">
         <label class="form-label small">Min riders</label>
         <input name="min" type="number" value="{min_riders}" class="form-control" style="width:80px" min="1">
@@ -421,12 +423,105 @@ def club_rankings():
         <button class="btn btn-primary" type="submit">Go</button>
       </div>
     </form>
+    <div class="table-responsive">
     <table class="table table-striped table-sm">
       <thead class="table-dark">
         <tr><th class='text-end'>#</th><th>Club</th><th class='text-end'>Riders</th><th class='text-end'>Rank Pts</th><th class='text-end'>Year Pts</th><th class='text-end'>Avg Pts</th></tr>
       </thead>
       <tbody>{trs}</tbody>
     </table>
+    </div>
+    """
+    return _page(body)
+
+
+# ── Races ───────────────────────────────────────────────────────────────────
+
+
+@route("/races")
+def races():
+    search = request.query.get("q", "")
+    year = request.query.get("year")
+    year = int(year) if year else None
+    rows = list_races(query=search, year=year, limit=500)
+
+    trs = ""
+    for r in rows:
+        link = f"/races/detail?event={quote(r['event_name'])}&race={quote(r['race_name'])}&year={r['year']}"
+        trs += (
+            f"<tr>"
+            f"<td class='text-end'>{r['race_date']}</td>"
+            f"<td><a href='{link}'>{r['event_name']}</a></td>"
+            f"<td><a href='{link}'>{r['race_name']}</a></td>"
+            f"<td class='text-end'>{r['year']}</td>"
+            f"<td class='text-end'>{r['rider_count']}</td>"
+            f"<td class='text-end'>{r['total_points']}</td>"
+            f"</tr>"
+        )
+
+    year_opts = "".join(
+        f'<option value="{y}"{" selected" if y == year else ""}>{y}</option>'
+        for y in range(datetime.now().year, 2019, -1)
+    )
+
+    body = f"""
+    <h4>Races</h4>
+    <form class="row g-2 mb-3">
+      <div class="col-auto">
+        <input name="q" class="form-control" placeholder="Search race or event..." value="{search}">
+      </div>
+      <div class="col-auto">
+        <select name="year" class="form-select">
+          <option value="">All years</option>
+          {year_opts}
+        </select>
+      </div>
+      <div class="col-auto"><button class="btn btn-primary" type="submit">Search</button></div>
+    </form>
+    <p class="text-muted small">{len(rows)} races shown</p>
+    <div class="table-responsive">
+    <table class="table table-striped table-sm">
+      <thead class="table-dark"><tr>
+        <th class='text-end'>Date</th><th>Event</th><th>Race</th><th class='text-end'>Year</th><th class='text-end'>Riders</th><th class='text-end'>Total Pts</th>
+      </tr></thead>
+      <tbody>{trs}</tbody>
+    </table>
+    </div>
+    """
+    return _page(body)
+
+
+@route("/races/detail")
+def race_detail():
+    event = request.query.get("event", "")
+    race = request.query.get("race", "")
+    year = request.query.get("year")
+    if not event or not race or not year:
+        return redirect("/races")
+    rows = get_race_riders(event, race, int(year))
+    if not rows:
+        return _page('<div class="alert alert-warning">No riders found for this race.</div>')
+
+    trs = ""
+    for r in rows:
+        name_link = f"<a href='/rider?uuid={r['uuid']}'>{r['name']}</a>" if 'uuid' in r.keys() else r['name']
+        club_link = f"<a href='/standings/{quote(r['club'])}'>{r['club']}</a>" if r['club'] else "-"
+        trs += f"<tr><td class='text-end'>{r['position']}</td><td>{name_link}</td><td>{club_link}</td><td class='text-end'>{r['points']}</td></tr>"
+
+    body = f"""
+    <h4>{event} — {race}</h4>
+    <div class="mb-3">
+      <span class="badge bg-secondary me-2">{year}</span>
+      <span class="badge bg-secondary me-2">{len(rows)} riders</span>
+      <span class="badge bg-secondary">Date: {rows[0]['race_date']}</span>
+    </div>
+    <div class="table-responsive">
+    <table class="table table-striped table-sm">
+      <thead class="table-dark"><tr><th class='text-end'>Pos</th><th>Rider</th><th>Club</th><th class='text-end'>Pts</th></tr></thead>
+      <tbody>{trs}</tbody>
+    </table>
+    </div>
+    <a href="/races" class="btn btn-outline-secondary btn-sm">&larr; All races</a>
     """
     return _page(body)
 

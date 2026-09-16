@@ -240,3 +240,59 @@ def get_club_standings(club_name: str, gender: str | None = None, show_zero: boo
     rows = conn.execute(query, params).fetchall()
     conn.close()
     return rows
+
+
+def list_races(query: str = "", year: int | None = None, limit: int = 200):
+    """List distinct races (event + race-name + year) with rider/points counts.
+    Each race_name within an event is treated as a separate race."""
+    conn = get_connection()
+    sql = """
+        SELECT event_name, race_name, year, MIN(race_date) AS race_date,
+               COUNT(*) AS rider_count,
+               SUM(CAST(points AS INTEGER)) AS total_points
+        FROM race_results
+        WHERE 1=1
+    """
+    params: list = []
+    if query:
+        sql += " AND (event_name LIKE ? OR race_name LIKE ?)"
+        like = f"%{query}%"
+        params += [like, like]
+    if year:
+        sql += " AND year = ?"
+        params.append(year)
+    sql += """
+        GROUP BY event_name, race_name, year
+        ORDER BY year DESC,
+            CASE SUBSTR(MIN(race_date), 4, 3)
+                WHEN 'Jan' THEN 1 WHEN 'Feb' THEN 2 WHEN 'Mar' THEN 3
+                WHEN 'Apr' THEN 4 WHEN 'May' THEN 5 WHEN 'Jun' THEN 6
+                WHEN 'Jul' THEN 7 WHEN 'Aug' THEN 8 WHEN 'Sep' THEN 9
+                WHEN 'Oct' THEN 10 WHEN 'Nov' THEN 11 WHEN 'Dec' THEN 12
+            END DESC,
+            CAST(SUBSTR(MIN(race_date), 1, 2) AS INTEGER) DESC,
+            event_name ASC, race_name ASC
+        LIMIT ?
+    """
+    params.append(limit)
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    return rows
+
+
+def get_race_riders(event_name: str, race_name: str, year: int):
+    """Riders and results for a specific race."""
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT rr.race_date, rr.position, rr.points, rr.year,
+               r.uuid, r.name, r.club, r.gender
+        FROM race_results rr
+        JOIN riders r ON r.uuid = rr.rider_uuid
+        WHERE rr.event_name = ? AND rr.race_name = ? AND rr.year = ?
+        ORDER BY CAST(rr.position AS INTEGER) ASC, r.name ASC
+        """,
+        (event_name, race_name, year),
+    ).fetchall()
+    conn.close()
+    return rows
